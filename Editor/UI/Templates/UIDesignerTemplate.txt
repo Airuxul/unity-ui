@@ -1,0 +1,14 @@
+using TMPro;
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace Air.UI.Generated
+{
+    /// <summary>
+    /// #CLASSNAME#鐨勮璁″櫒閮ㄥ垎锛屽寘鍚玌I缁勪欢瀛楁瀹氫箟
+    /// </summary>
+    public partial class #CLASSNAME#
+    {
+#FIELDS#
+    }
+}

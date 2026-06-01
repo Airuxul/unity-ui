@@ -1,0 +1,45 @@
+using TMPro;
+using UnityEngine;
+using UnityEngine.UI;
+using Air.UI;
+
+namespace Air.UI.Generated
+{
+    /// <summary>
+    /// 自动生成的#CLASSNAME# UI组件
+    /// </summary>
+    public partial class #CLASSNAME# : UIPanel
+    {
+        /// <summary>
+        /// 初始化UI组件
+        /// </summary>
+        protected override void OnUIInit()
+        {
+            // 子类可以重写此方法进行初始化逻辑
+        }
+   
+        /// <summary>
+        /// 显示UI组件
+        /// </summary>
+        protected override void OnUIShow(IUIShowParam param = null)
+        {
+            // 子类可以重写此方法进行显示逻辑
+        }
+   
+        /// <summary>
+        /// 隐藏UI组件
+        /// </summary>
+        protected override void OnUIHide()
+        {
+            // 子类可以重写此方法进行隐藏逻辑
+        }
+   
+        /// <summary>
+        /// 销毁UI组件
+        /// </summary>
+        protected override void OnUIDestory()
+        {
+            
+        }
+    }
+}

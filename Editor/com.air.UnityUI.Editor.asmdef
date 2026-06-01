@@ -1,0 +1,22 @@
+{
+  "name": "com.air.UnityUI.Editor",
+  "rootNamespace": "Air.UI.Editor",
+  "references": [
+    "com.air.UnityUI.Runtime",
+    "com.air.UnityGameCore.Runtime",
+    "Unity.TextMeshPro",
+    "UnityEditor",
+    "UnityEngine.UI"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
