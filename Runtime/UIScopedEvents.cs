@@ -6,7 +6,8 @@ using UnityEngine;
 namespace Air.UI
 {
     /// <summary>
-    /// UI 缁勪欢绾т簨浠朵綔鐢ㄥ煙锛氭敞鍐屽埌 <see cref="EventBus"/> 骞惰窡韪敞閿€銆?    /// </summary>
+    /// UI 组件级事件作用域：注册到 <see cref="EventBus"/> 并跟踪注销。
+    /// </summary>
     public sealed class UIScopedEvents
     {
         readonly EventBus _bus;
@@ -40,7 +41,7 @@ namespace Air.UI
             if (string.IsNullOrEmpty(eventName)) return;
             if (!_unregister.TryGetValue(eventName, out var unregister))
             {
-                Debug.LogWarning($"[UIScopedEvents] 鏈壘鍒板凡娉ㄥ唽浜嬩欢: {eventName}");
+                Debug.LogWarning($"[UIScopedEvents] 未找到已注册事件: {eventName}");
                 return;
             }
             unregister.Invoke();
@@ -58,17 +59,17 @@ namespace Air.UI
         {
             if (string.IsNullOrEmpty(eventName))
             {
-                Debug.LogError("[UIScopedEvents] 浜嬩欢鍚嶇О涓虹┖");
+                Debug.LogError("[UIScopedEvents] 事件名称为空");
                 return false;
             }
             if (callback == null)
             {
-                Debug.LogError("[UIScopedEvents] 鍥炶皟涓虹┖");
+                Debug.LogError("[UIScopedEvents] 回调为空");
                 return false;
             }
             if (_unregister.ContainsKey(eventName))
             {
-                Debug.LogError($"[UIScopedEvents] 宸叉敞鍐岃繃璇ヤ簨浠? {eventName}");
+                Debug.LogError($"[UIScopedEvents] 已注册过该事件: {eventName}");
                 return false;
             }
             return true;

@@ -36,6 +36,7 @@ namespace Air.UI
         private const float MatchWidthOrHeight = 0.5f;
         
         // 层级排序常量
+        private const int NormalLayerSortingOrder = 0;
         private const int PopLayerSortingOrder = 100;
         private const int TopLayerSortingOrder = 200;
         
@@ -55,6 +56,7 @@ namespace Air.UI
         private readonly Dictionary<string, UIPanel> _uiMap;
 
         private GameObject _uiRoot;
+        private GameObject _normalRoot;
         private GameObject _popRoot;
         private GameObject _topRoot;
         private CanvasScaler _canvasScaler;
@@ -65,8 +67,11 @@ namespace Air.UI
             _events = events;
             _uiMap = new Dictionary<string, UIPanel>();
 
+            Navigator = new UIPanelNavigator(this);
             CreateRoot();
         }
+
+        public UIPanelNavigator Navigator { get; }
 
         /// <summary>
         /// 创建 UI 根节点和各层级节点
@@ -80,7 +85,7 @@ namespace Air.UI
             _uiRoot.AddComponent<GraphicRaycaster>();
             Object.DontDestroyOnLoad(_uiRoot);
             
-            // 创建各层级节点
+            _normalRoot = CreateChildRoot("NormalRoot", _uiRoot.transform, sortingOrder: NormalLayerSortingOrder);
             _popRoot = CreateChildRoot("PopRoot", _uiRoot.transform, sortingOrder: PopLayerSortingOrder);
             _topRoot = CreateChildRoot("TopRoot", _uiRoot.transform, sortingOrder: TopLayerSortingOrder);
         }
@@ -125,13 +130,26 @@ namespace Air.UI
             return childRoot;
         }
 
-        public UIPanel GetUIPanel(string uiPanelId)
+        public UIPanel GetUIPanel(string uiPanelId) =>
+            _uiMap[uiPanelId];
+
+        public bool TryGetUIPanel(string uiPanelId, out UIPanel panel) =>
+            _uiMap.TryGetValue(uiPanelId, out panel);
+
+        public void ShowPanel(UIPanelConfig uiPanelConfig, IUIShowParam showParam) =>
+            ShowPanel(uiPanelConfig, showParam, null);
+
+        public void ShowPanel(UIPanelConfig uiPanelConfig, IUIShowParam showParam, Action<UIPanel> onShown)
         {
-            return _uiMap[uiPanelId];
-        }
-        
-        public void ShowPanel(UIPanelConfig uiPanelConfig, IUIShowParam showParam)
-        {
+            if (_uiMap.TryGetValue(uiPanelConfig.UIPanelId, out var existing))
+            {
+                existing.gameObject.SetActive(true);
+                existing.Show(showParam);
+                _events.Emit(UIEvents.PanelShown, uiPanelConfig);
+                onShown?.Invoke(existing);
+                return;
+            }
+
             var prefabPath = uiPanelConfig.PrefabPath;
             _resManager.LoadInstanceAsync<GameObject>(prefabPath, go =>
             {
@@ -143,12 +161,13 @@ namespace Air.UI
                 SetPanelRoot(uiPanelConfig.UILayer, go);
                 var rectTransform = go.GetComponent<RectTransform>();
                 rectTransform.FillParent();
-                
+
                 uiPanel.Init(uiPanelConfig);
                 uiPanel.Show(showParam);
                 _uiMap.Add(uiPanelConfig.UIPanelId, uiPanel);
-                
+
                 _events.Emit(UIEvents.PanelShown, uiPanelConfig);
+                onShown?.Invoke(uiPanel);
             });
         }
 
@@ -157,6 +176,9 @@ namespace Air.UI
             GameObject rootGo;
             switch (panelLayer)
             {
+                case EPanelLayer.Normal:
+                    rootGo = _normalRoot;
+                    break;
                 case EPanelLayer.Pop:
                     rootGo = _popRoot;
                     break;
@@ -164,7 +186,7 @@ namespace Air.UI
                     rootGo = _topRoot;
                     break;
                 default:
-                    throw new Exception("UILayer is wrong");
+                    throw new System.ArgumentOutOfRangeException(nameof(panelLayer), panelLayer, null);
             }
             uiPanelGo.transform.SetParent(rootGo.transform);
         }

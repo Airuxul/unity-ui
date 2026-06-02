@@ -8,9 +8,13 @@ UI panels, component lifecycle, State/Trigger, and editor codegen. Depends on `c
 using Air.UI;
 using Air.UnityGameCore.Runtime;
 
-var entry = GameEntry.CreateWithUI();
+using var entry = GameEntry.CreateWithUI();
 entry.Runtime.Events.On("game.ready", () => { });
 entry.UI.Panels.ShowPanel(config, showParam);
+
+// Stack navigation (Normal / Pop / Top layers; Pop=0, Top=1, Normal=2)
+entry.UI.Navigator.Push(settingsConfig, null, panel => { /* loaded */ });
+entry.UI.Navigator.Pop();
 
 // Or step by step:
 var runtime = GameRuntime.CreateDefault();

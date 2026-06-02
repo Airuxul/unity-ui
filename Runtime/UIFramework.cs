@@ -5,19 +5,21 @@ using Air.UnityGameCore.Runtime.Resource;
 namespace Air.UI
 {
     /// <summary>
-    /// UI 瀛愮郴缁熷叆鍙ｃ€傞€氳繃 <see cref="Install"/> 缁戝畾 <see cref="IGameRuntime"/> 鍚庝娇鐢?<see cref="Panels"/>銆?    /// </summary>
+    /// UI 子系统入口。通过 <see cref="Install"/> 绑定 <see cref="IGameRuntime"/> 后使用 <see cref="Panels"/>。
+    /// </summary>
     public sealed class UIFramework
     {
         static UIFramework _current;
 
         public static UIFramework Current =>
             _current ?? throw new System.InvalidOperationException(
-                "[UIFramework] 鏈畨瑁呫€傝鍏堣皟鐢?UIFramework.Install(runtime)銆?);
+                "[UIFramework] 未安装。请先调用 UIFramework.Install(runtime)。");
 
         public static bool IsInstalled => _current != null;
 
         public IGameRuntime Runtime { get; }
         public UIManager Panels { get; }
+        public UIPanelNavigator Navigator => Panels.Navigator;
         public EventBus Events => Runtime.Events;
 
         UIFramework(IGameRuntime runtime)

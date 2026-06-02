@@ -1,7 +1,7 @@
 {
   "name": "com.air.unity-ui",
   "displayName": "Air UI",
-  "version": "2.0.0",
+  "version": "2.2.0",
   "unity": "2020.3",
   "description": "UI framework: UIFramework, UIManager, UIComponent, UIScopedEvents, state/trigger, editor codegen.",
   "keywords": ["ui", "ugui", "panel", "codegen"],
@@ -10,7 +10,7 @@
     "name": "airuxul"
   },
   "dependencies": {
-    "com.air.unity-game-core": "2.0.0",
+    "com.air.unity-game-core": "4.0.0",
     "com.unity.textmeshpro": "3.0.6"
   }
 }
