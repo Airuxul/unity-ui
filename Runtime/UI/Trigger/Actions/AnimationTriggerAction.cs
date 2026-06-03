@@ -28,7 +28,6 @@ namespace Air.UI.Trigger
         private Animation _animation;
         private Animator _animator;
 
-
         /// <summary> 目标 GameObject，为空时使用挂载 UITriggerCtrl 的对象。 </summary>
         public GameObject TargetObject
         {
