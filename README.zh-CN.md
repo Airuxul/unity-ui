@@ -81,6 +81,19 @@ public partial class MyPanel : UIPanel
 - **Window → AirUI → UI Script Generator** — 从层级生成面板/组件逻辑脚本
 - UI 组件右键菜单快捷入口（见 `UIGeneratorContextMenu`）
 
+## unity-cmd
+
+```bash
+unity-cmd --profile editor ui.generate \
+  --prefab_path Assets/UI/MyPanel.prefab \
+  --output_folder Assets/Scripts/UI/Panels \
+  --class_name MyPanel \
+  --namespace MyGame.UI \
+  --ui_type panel
+```
+
+命令实现：`Editor/Cli/UiGenerateScriptCommand.cs`（依赖 `com.air.unity-connector` 发现机制）。
+
 ## 依赖
 
 - `com.air.unity-game-core` 4.0.0+

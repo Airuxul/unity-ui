@@ -23,6 +23,8 @@ namespace Air.UI.Editor
         private const string UIComponentParnentFieldName = "parent";
         private const string PendingGoPathKey = "UISerializer_PendingGameObjectPath";
         private const string PendingClassNameKey = "UISerializer_PendingClassName";
+        private const string PendingPrefabPathKey = "UISerializer_PendingPrefabPath";
+        private const string PendingNamespaceKey = "UISerializer_PendingNamespace";
         
         [DidReloadScripts]
         private static void OnScriptsReloaded()
@@ -41,51 +43,106 @@ namespace Air.UI.Editor
         /// <param name="className">类名</param>
         public static void AddPendingAttachment(string gameObjectPath, string className)
         {
-            // 保存到EditorPrefs
+            EditorPrefs.DeleteKey(PendingPrefabPathKey);
+            EditorPrefs.DeleteKey(PendingNamespaceKey);
             EditorPrefs.SetString(PendingGoPathKey, gameObjectPath);
             EditorPrefs.SetString(PendingClassNameKey, className);
+        }
+
+        /// <summary>Queue attach+bind after script compile for a Resources prefab asset.</summary>
+        public static void AddPendingPrefabAttachment(
+            string prefabAssetPath,
+            string className,
+            string namespaceOverride = null)
+        {
+            EditorPrefs.DeleteKey(PendingGoPathKey);
+            EditorPrefs.SetString(PendingPrefabPathKey, prefabAssetPath);
+            EditorPrefs.SetString(PendingClassNameKey, className);
+            if (!string.IsNullOrWhiteSpace(namespaceOverride))
+                EditorPrefs.SetString(PendingNamespaceKey, namespaceOverride);
+            else
+                EditorPrefs.DeleteKey(PendingNamespaceKey);
+        }
+
+        /// <summary>Attach panel script and bind SerializeField refs on a prefab root (call before SaveAsPrefabAsset).</summary>
+        public static bool TryAttachAndBindPrefabRoot(
+            GameObject root,
+            string className,
+            string namespaceOverride = null)
+        {
+            if (!root) return false;
+            var scriptType = ResolveScriptType(className, namespaceOverride);
+            if (scriptType == null)
+                return false;
+
+            PostGenerateProcess(root, className, namespaceOverride);
+            return root.TryGetComponent(scriptType, out _);
         }
         
         /// <summary>
         /// 检查是否有待处理的任务
         /// </summary>
         /// <returns>如果有待处理任务返回true</returns>
-        private static bool HasPendingTask()
-        {
-            return EditorPrefs.HasKey(PendingGoPathKey);
-        }
-        
-        /// <summary>
-        /// 处理待处理的任务
-        /// </summary>
+        private static bool HasPendingTask() =>
+            EditorPrefs.HasKey(PendingPrefabPathKey) || EditorPrefs.HasKey(PendingGoPathKey);
+
         private static void ProcessPendingTask()
         {
-            string gameObjectPath = EditorPrefs.GetString(PendingGoPathKey);
-            string className = EditorPrefs.GetString(PendingClassNameKey);
-            
-            Debug.Log($"ProcessPendingTask: {gameObjectPath}, {className}");
-            
-            GameObject go = FindGameObjectByPath(gameObjectPath);
-            if (go != null)
+            var className = EditorPrefs.GetString(PendingClassNameKey);
+            var namespaceOverride = EditorPrefs.HasKey(PendingNamespaceKey)
+                ? EditorPrefs.GetString(PendingNamespaceKey)
+                : null;
+
+            if (EditorPrefs.HasKey(PendingPrefabPathKey))
             {
-                PostGenerateProcess(go, className);
+                var prefabPath = EditorPrefs.GetString(PendingPrefabPathKey);
+                Debug.Log($"ProcessPendingPrefabTask: {prefabPath}, {className}");
+                ProcessPendingPrefabAttachment(prefabPath, className, namespaceOverride);
             }
             else
             {
-                Debug.LogError($"Could not find GameObject at path: {gameObjectPath}");
+                var gameObjectPath = EditorPrefs.GetString(PendingGoPathKey);
+                Debug.Log($"ProcessPendingHierarchyTask: {gameObjectPath}, {className}");
+                var go = FindGameObjectByPath(gameObjectPath);
+                if (go != null)
+                    PostGenerateProcess(go, className, namespaceOverride);
+                else
+                    Debug.LogError($"Could not find GameObject at path: {gameObjectPath}");
             }
-            
-            // 清除EditorPrefs
+
             ClearPendingTask();
         }
-        
-        /// <summary>
-        /// 清除待处理任务
-        /// </summary>
-        private static void ClearPendingTask()
+
+        static void ProcessPendingPrefabAttachment(
+            string prefabAssetPath,
+            string className,
+            string namespaceOverride)
+        {
+            var root = PrefabUtility.LoadPrefabContents(prefabAssetPath);
+            try
+            {
+                if (!TryAttachAndBindPrefabRoot(root, className, namespaceOverride))
+                {
+                    Debug.LogError(
+                        $"Failed to attach {className} on prefab {prefabAssetPath}. Re-run ui.generate after compile.");
+                    return;
+                }
+
+                PrefabUtility.SaveAsPrefabAsset(root, prefabAssetPath);
+                AssetDatabase.ImportAsset(prefabAssetPath, ImportAssetOptions.ForceUpdate);
+            }
+            finally
+            {
+                PrefabUtility.UnloadPrefabContents(root);
+            }
+        }
+
+        static void ClearPendingTask()
         {
             EditorPrefs.DeleteKey(PendingGoPathKey);
             EditorPrefs.DeleteKey(PendingClassNameKey);
+            EditorPrefs.DeleteKey(PendingPrefabPathKey);
+            EditorPrefs.DeleteKey(PendingNamespaceKey);
         }
         
         /// <summary>
@@ -391,37 +448,29 @@ namespace Air.UI.Editor
         /// </summary>
         /// <param name="targetGo">目标GameObject</param>
         /// <param name="className">类名</param>
-        private static void PostGenerateProcess(GameObject targetGo, string className)
+        private static void PostGenerateProcess(
+            GameObject targetGo,
+            string className,
+            string namespaceOverride = null)
         {
             if (!targetGo) return;
-            
-            // 挂载脚本
-            AttachScriptToGameObject(targetGo, className);
-            
-            // 绑定字段
+
+            AttachScriptToGameObject(targetGo, className, namespaceOverride);
+
             if (targetGo.TryGetComponent(out UIComponent uiComponent))
-            {
-                // 脚本已经编译完成，立即绑定
                 BindUIComponent(uiComponent);
-            }
         }
-        
-        /// <summary>
-        /// 将脚本挂载到GameObject上
-        /// </summary>
-        /// <param name="targetGo">目标GameObject</param>
-        /// <param name="className">类名</param>
-        private static void AttachScriptToGameObject(GameObject targetGo, string className)
+
+        private static void AttachScriptToGameObject(
+            GameObject targetGo,
+            string className,
+            string namespaceOverride = null)
         {
-            // 检查是否已经有UIComponent类型的组件
             var existingUIComponent = targetGo.GetComponent<UIComponent>();
             if (existingUIComponent)
-            {
                 return;
-            }
-            
-            // 通过反射查找类型
-            Type scriptType = GetTypeByName(className);
+
+            Type scriptType = ResolveScriptType(className, namespaceOverride);
             if (scriptType == null)
             {
                 Debug.LogError($"Could not find script type {className}. Make sure the script compiled successfully.");
@@ -459,11 +508,22 @@ namespace Air.UI.Editor
             }
         }
         
-        /// <summary>
-        /// 通过类型名获取类型
-        /// </summary>
-        /// <param name="typeName">类型名</param>
-        /// <returns>类型实例，如果没找到返回null</returns>
+        static Type ResolveScriptType(string className, string namespaceOverride)
+        {
+            if (!string.IsNullOrWhiteSpace(namespaceOverride))
+            {
+                var fullName = $"{namespaceOverride}.{className}";
+                foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    var type = assembly.GetType(fullName);
+                    if (type != null)
+                        return type;
+                }
+            }
+
+            return GetTypeByName(className);
+        }
+
         private static Type GetTypeByName(string typeName)
         {
             // 获取所有可能的命名空间

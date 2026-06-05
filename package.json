@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "com.air.unity-game-core": "4.0.0",
+    "com.air.unity-connector": "1.0.0",
     "com.unity.textmeshpro": "3.0.6"
   }
 }

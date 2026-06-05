@@ -4,6 +4,7 @@ using System.Text;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.UI;
 using Air.UI;
 using Transform = UnityEngine.Transform;
 
@@ -14,6 +15,14 @@ namespace Air.UI.Editor
     /// </summary>
     public static class UIScriptGenerator
     {
+        static readonly UTF8Encoding Utf8WithBom = new(encoderShouldEmitUTF8Identifier: true);
+
+        static void WriteUtf8(string path, string content) =>
+            File.WriteAllText(path, content, Utf8WithBom);
+
+        static string ReadUtf8(string path) =>
+            File.ReadAllText(path, Encoding.UTF8);
+
         /// <summary>
         /// 生成新的脚本（首次生成）
         /// </summary>
@@ -21,9 +30,22 @@ namespace Air.UI.Editor
             GameObject targetGo,
             string className,
             string outputFolder,
-            UIType uiType
-        )
+            UIType uiType) =>
+            GenerateUIScript(targetGo, className, outputFolder, uiType, null);
+
+        public static void GenerateUIScript(
+            GameObject targetGo,
+            string className,
+            string outputFolder,
+            UIType uiType,
+            UiGenerateScriptOptions options)
         {
+            options ??= new UiGenerateScriptOptions();
+            var typeInfo = UITypeConfig.GetInfo(uiType);
+            var namespaceName = string.IsNullOrWhiteSpace(options.NamespaceOverride)
+                ? typeInfo.Namespace
+                : options.NamespaceOverride;
+
             var existingUIComponent = targetGo.GetComponent<UIComponent>();
             if (existingUIComponent)
             {
@@ -41,27 +63,28 @@ namespace Air.UI.Editor
             var logicScriptPath = Path.Combine(outputFolder, className + ".cs");
             if (!existingUIComponent)
             {
-                var logicScript = GenerateLogicScript(className, fields, uiType);
+                var logicScript = GenerateLogicScript(className, fields, uiType, namespaceName);
                 if (string.IsNullOrEmpty(logicScript))
                 {
                     throw new Exception("logicScript is null or empty");
                 }
 
-                File.WriteAllText(logicScriptPath, logicScript);
+                WriteUtf8(logicScriptPath, logicScript);
                 Debug.Log($"Generated logic script: {logicScriptPath}");
             }
 
             // 生成设计器脚本
-            string designerScript = GenerateDesignerScript(className, fields);
+            string designerScript = GenerateDesignerScript(className, fields, namespaceName);
             string designerScriptPath = Path.Combine(outputFolder, className + ".Designer.cs");
-            File.WriteAllText(designerScriptPath, designerScript);
+            WriteUtf8(designerScriptPath, designerScript);
+            if (options.PruneButtonDecorations)
+                PruneDesignerScriptFile(designerScriptPath);
             Debug.Log($"Generated designer script: {designerScriptPath}");
 
-            UITypeInfo typeInfo = UITypeConfig.GetInfo(uiType);
             Debug.Log($"Successfully generated {typeInfo.DisplayName} scripts for {className} to {outputFolder}");
 
-            // 添加到UISerializer的待处理列表，等待编译完成
-            UISerializer.AddPendingAttachment(GetGameObjectPath(targetGo), className);
+            if (!options.PrefabPipelineAttach)
+                UISerializer.AddPendingAttachment(GetGameObjectPath(targetGo), className);
 
             AssetDatabase.ImportAsset(logicScriptPath, ImportAssetOptions.ForceUpdate);
             AssetDatabase.ImportAsset(designerScriptPath, ImportAssetOptions.ForceUpdate);
@@ -122,7 +145,11 @@ namespace Air.UI.Editor
         /// <param name="fields">组件字段列表</param>
         /// <param name="uiType">脚本类型</param>
         /// <returns>逻辑脚本内容</returns>
-        private static string GenerateLogicScript(string className, List<ComponentField> fields, UIType uiType)
+        private static string GenerateLogicScript(
+            string className,
+            List<ComponentField> fields,
+            UIType uiType,
+            string namespaceName)
         {
             var templatePath = GetLogicTemplatePath(uiType);
             if (!File.Exists(templatePath))
@@ -130,7 +157,7 @@ namespace Air.UI.Editor
                 throw new Exception($"Logic template file not found: {templatePath}");
             }
 
-            return GenerateScriptFromTemplate(templatePath, className, fields);
+            return GenerateScriptFromTemplate(templatePath, className, fields, namespaceName);
         }
 
         /// <summary>
@@ -139,7 +166,10 @@ namespace Air.UI.Editor
         /// <param name="className">类名</param>
         /// <param name="fields">组件字段列表</param>
         /// <returns>设计器脚本内容</returns>
-        private static string GenerateDesignerScript(string className, List<ComponentField> fields)
+        private static string GenerateDesignerScript(
+            string className,
+            List<ComponentField> fields,
+            string namespaceName)
         {
             var templatePath = GetDesignerTemplatePath();
             if (!File.Exists(templatePath))
@@ -147,7 +177,27 @@ namespace Air.UI.Editor
                 throw new Exception($"Designer template file not found: {templatePath}");
             }
 
-            return GenerateScriptFromTemplate(templatePath, className, fields);
+            return GenerateScriptFromTemplate(templatePath, className, fields, namespaceName);
+        }
+
+        internal static void PruneDesignerScriptFile(string designerScriptPath)
+        {
+            if (!File.Exists(designerScriptPath))
+                return;
+
+            var lines = File.ReadAllLines(designerScriptPath, Encoding.UTF8);
+            var kept = new List<string>(lines.Length);
+            foreach (var line in lines)
+            {
+                if (line.Contains("private Image ", StringComparison.Ordinal))
+                    continue;
+                if (line.Contains("caption", StringComparison.OrdinalIgnoreCase)
+                    && line.Contains("private Text ", StringComparison.Ordinal))
+                    continue;
+                kept.Add(line);
+            }
+
+            File.WriteAllLines(designerScriptPath, kept, Utf8WithBom);
         }
 
         /// <summary>
@@ -157,13 +207,17 @@ namespace Air.UI.Editor
         /// <param name="className">类名</param>
         /// <param name="fields">组件字段列表</param>
         /// <returns>生成的脚本内容</returns>
-        private static string GenerateScriptFromTemplate(string templatePath, string className,
-            List<ComponentField> fields)
+        private static string GenerateScriptFromTemplate(
+            string templatePath,
+            string className,
+            List<ComponentField> fields,
+            string namespaceName)
         {
-            string template = File.ReadAllText(templatePath);
+            string template = ReadUtf8(templatePath);
 
             // 替换类名
             template = template.Replace("#CLASSNAME#", className);
+            template = template.Replace("namespace Air.UI.Generated", $"namespace {namespaceName}");
 
             // 替换字段
             if (template.Contains("#FIELDS#"))
@@ -274,15 +328,23 @@ namespace Air.UI.Editor
         private static void CollectComponentFieldsRecursive(Transform transform, List<ComponentField> fields,
             string path)
         {
+            if (IsButtonCaptionChild(transform))
+            {
+                return;
+            }
+
             Component[] components = transform.GetComponents<Component>();
             List<ComponentField> newFields = new List<ComponentField>();
             var isFirst = string.IsNullOrEmpty(path);
             var curObjName = transform.name;
             var currentPath = isFirst ? transform.name : $"{path}/{transform.name}";
+            var hasButton = transform.GetComponent<Button>() != null;
             foreach (var component in components)
             {
                 var componentType = component.GetType();
                 if (!UIComponentTypes.IsBasicType(componentType))
+                    continue;
+                if (hasButton && componentType == typeof(Image))
                     continue;
                 var fieldName = ToFieldName(curObjName);
                 var isUIComp = UIComponentTypes.IsUIComponent(componentType);
@@ -308,6 +370,14 @@ namespace Air.UI.Editor
                 var child = transform.GetChild(i);
                 CollectComponentFieldsRecursive(child, fields, currentPath);
             }
+        }
+
+        static bool IsButtonCaptionChild(Transform transform)
+        {
+            var parent = transform.parent;
+            if (parent == null)
+                return false;
+            return parent.GetComponent<Button>() != null && transform.GetComponent<Text>() != null;
         }
     }
 

@@ -4,6 +4,7 @@
   "references": [
     "com.air.UnityUI.Runtime",
     "com.air.UnityGameCore.Runtime",
+    "com.air.UnityConnector.Runtime",
     "Unity.TextMeshPro",
     "UnityEditor",
     "UnityEngine.UI"
