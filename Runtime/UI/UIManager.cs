@@ -1,281 +1,329 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
-using Air.UnityGameCore.Runtime.Event;
-using Air.UI.Extensions;
-using Air.UnityGameCore.Runtime.Resource;
-using Object = UnityEngine.Object;
 
 namespace Air.UI
 {
-    /// <summary>
-    /// 分辨率信息
-    /// </summary>
-    public struct ResolutionInfo
-    {
-        public readonly string Name;
-        public readonly int Width;
-        public readonly int Height;
-        public readonly bool Fullscreen;
-
-        public ResolutionInfo(string name, int width, int height, bool fullscreen = false)
-        {
-            Name = name;
-            Width = width;
-            Height = height;
-            Fullscreen = fullscreen;
-        }
-    }
-
     public class UIManager
     {
-        // UI 配置常量
-        private const float ReferenceResolutionWidth = 1920f;
-        private const float ReferenceResolutionHeight = 1080f;
-        private const float MatchWidthOrHeight = 0.5f;
-        
-        // 层级排序常量
-        private const int NormalLayerSortingOrder = 0;
-        private const int PopLayerSortingOrder = 100;
-        private const int TopLayerSortingOrder = 200;
-        
-        // 预设分辨率选项
-        private static readonly ResolutionInfo[] PresetResolutions = {
-            new("1920x1080 (Full HD)", 1920, 1080),
-            new("1280x720 (HD)", 1280, 720),
-            new("1600x900", 1600, 900),
-            new("2560x1440 (2K)", 2560, 1440),
-            new("3840x2160 (4K)", 3840, 2160),
-            new("800x600", 800, 600),
-            new("1024x768", 1024, 768),
-        };
-        
-        private readonly IResManager _resManager;
-        private readonly EventBus _events;
-        private readonly Dictionary<string, UIPanel> _uiMap;
+        public static UIManager Current { get; private set; }
 
-        private GameObject _uiRoot;
-        private GameObject _normalRoot;
-        private GameObject _popRoot;
-        private GameObject _topRoot;
-        private CanvasScaler _canvasScaler;
-        
-        public UIManager(IResManager resManager, EventBus events)
+        readonly List<Page> pop = new List<Page>();
+        readonly List<Page> normal = new List<Page>();
+        readonly List<Page> top = new List<Page>();
+        readonly Transform normalRoot;
+        readonly Transform topRoot;
+        readonly Transform popRoot;
+        readonly GameObject popBlocker;
+        readonly GameObject touchBlocker;
+        UIViewController abandonResumed;
+        int sequence;
+
+        public UIManager()
         {
-            _resManager = resManager;
-            _events = events;
-            _uiMap = new Dictionary<string, UIPanel>();
-
-            Navigator = new UIPanelNavigator(this);
-            CreateRoot();
+            Current = this;
+            if (UnityEngine.Object.FindObjectOfType<EventSystem>() == null)
+                new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
+            var root = new GameObject("UIRoot", typeof(UIEscapeInput)).transform;
+            normalRoot = CreateLayer(root, "Normal", 0);
+            topRoot = CreateLayer(root, "Top", 100);
+            popRoot = CreateLayer(root, "Pop", 200);
+            popBlocker = CreateBlocker(popRoot, "PopBlocker");
+            var touchRoot = CreateLayer(root, "TouchBlocker", 300);
+            touchBlocker = CreateBlocker(touchRoot, "Blocker");
+            UIViewLoader.Load = Load;
         }
 
-        public UIPanelNavigator Navigator { get; }
-
-        /// <summary>
-        /// 创建 UI 根节点和各层级节点
-        /// </summary>
-        private void CreateRoot()
+        // 不可点时挡住全部层级，包括当前 Pop。
+        public void SetUITouchable(bool touchable)
         {
-            // 创建 UI 根节点
-            _uiRoot = new GameObject("UIRoot");
-            SetupCanvas(_uiRoot);
-            SetupCanvasScaler(_uiRoot);
-            _uiRoot.AddComponent<GraphicRaycaster>();
-            Object.DontDestroyOnLoad(_uiRoot);
-            
-            _normalRoot = CreateChildRoot("NormalRoot", _uiRoot.transform, sortingOrder: NormalLayerSortingOrder);
-            _popRoot = CreateChildRoot("PopRoot", _uiRoot.transform, sortingOrder: PopLayerSortingOrder);
-            _topRoot = CreateChildRoot("TopRoot", _uiRoot.transform, sortingOrder: TopLayerSortingOrder);
+            touchBlocker.SetActive(!touchable);
         }
 
-        /// <summary>
-        /// 配置 Canvas 组件
-        /// </summary>
-        private void SetupCanvas(GameObject root)
+        public void CloseAll()
         {
-            var canvas = root.AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.sortingOrder = 0;
+            CloseLayer(EPanelLayer.Pop);
+            CloseLayer(EPanelLayer.Top);
+            CloseLayer(EPanelLayer.Normal);
         }
 
-        /// <summary>
-        /// 配置 CanvasScaler 组件
-        /// </summary>
-        private void SetupCanvasScaler(GameObject root)
+        public void CloseLayer(EPanelLayer layer)
         {
-            _canvasScaler = root.AddComponent<CanvasScaler>();
-            _canvasScaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            _canvasScaler.referenceResolution = new Vector2(ReferenceResolutionWidth, ReferenceResolutionHeight);
-            _canvasScaler.matchWidthOrHeight = MatchWidthOrHeight;
+            var list = ListOf(layer);
+            var closing = new UIViewController[list.Count];
+            for (int i = 0; i < list.Count; i++)
+                closing[i] = list[i].Controller;
+            for (int i = closing.Length - 1; i >= 0; i--)
+                closing[i].Close();
         }
 
-        /// <summary>
-        /// 创建子层级节点
-        /// </summary>
-        /// <param name="name">节点名称</param>
-        /// <param name="parent">父节点</param>
-        /// <param name="sortingOrder">渲染排序</param>
-        /// <returns>创建的子节点</returns>
-        private GameObject CreateChildRoot(string name, Transform parent, int sortingOrder = 0)
+        // 只登记路径、层级和 Order，不加载 Prefab。
+        protected void Register<TView>(UIViewController<TView> controller, string prefabPath, EPanelLayer layer, int order) where TView : UIView
         {
-            var childRoot = new GameObject(name);
-            var rectTransform = childRoot.AddComponent<RectTransform>();
-            rectTransform.SetParent(parent, false);
-            
-            // 设置 RectTransform 充满父节点
-            rectTransform.FillParent();
-
-            return childRoot;
+            controller.Setup(prefabPath, layer, order);
         }
 
-        public UIPanel GetUIPanel(string uiPanelId) =>
-            _uiMap[uiPanelId];
-
-        public bool TryGetUIPanel(string uiPanelId, out UIPanel panel) =>
-            _uiMap.TryGetValue(uiPanelId, out panel);
-
-        public void ShowPanel(UIPanelConfig uiPanelConfig, IUIShowParam showParam) =>
-            ShowPanel(uiPanelConfig, showParam, null);
-
-        public void ShowPanel(UIPanelConfig uiPanelConfig, IUIShowParam showParam, Action<UIPanel> onShown)
+        // Controller.Open 的入口。Pop 走栈，Normal 和 Top 按层保留。
+        internal void Present(UIViewController controller, IShowParam param)
         {
-            if (_uiMap.TryGetValue(uiPanelConfig.UIPanelId, out var existing))
+            if (controller == null || !controller.CanOpen(param)) return;
+            if (controller.Layer == EPanelLayer.Pop)
             {
-                existing.gameObject.SetActive(true);
-                existing.Show(showParam);
-                _events.Emit(UIEvents.PanelShown, uiPanelConfig);
-                onShown?.Invoke(existing);
+                PresentPop(controller, param);
                 return;
             }
+            PresentKept(ListOf(controller.Layer), controller, param);
+        }
 
-            var prefabPath = uiPanelConfig.PrefabPath;
-            _resManager.LoadInstanceAsync<GameObject>(prefabPath, go =>
+        // Controller.Close 的入口。关掉的是 Pop 栈顶时，下一页用留下的参数 OnResume。
+        internal void Dismiss(UIViewController controller)
+        {
+            if (controller == null || controller.Life != ViewLife.Shown) return;
+            var list = ListOf(controller.Layer);
+            int index = Find(list, controller);
+            if (index < 0) return;
+            Page resume = null;
+            if (controller.Layer == EPanelLayer.Pop && index == list.Count - 1 && index > 0)
+                resume = list[index - 1];
+            list.RemoveAt(index);
+            controller.ApplyClose();
+            if (resume != null && Find(list, resume.Controller) >= 0)
+                resume.Controller.ApplyResume(resume.Param);
+            Arrange(controller.Layer);
+            if (controller.Layer == EPanelLayer.Pop)
+                popBlocker.SetActive(pop.Count > 0);
+        }
+
+        // 窗口被外部销毁后的记账，不再销毁窗口。只有关掉的是已经 Shown 的栈顶时，下一页才 OnResume。
+        internal void Abandon(UIViewController controller, bool resumeCovered)
+        {
+            if (controller == null) return;
+            int index = Find(pop, controller);
+            if (index >= 0)
             {
-                if (!go.TryGetComponent(out UIPanel uiPanel))
+                Page resume = index == pop.Count - 1 && index > 0 ? pop[index - 1] : null;
+                pop.RemoveAt(index);
+                if (resumeCovered && resume != null && Find(pop, resume.Controller) >= 0 && resume.Controller.Life == ViewLife.Shown)
                 {
-                    Debug.LogError($"cant find UIPanel component, path: {prefabPath}");
-                    return;
+                    resume.Controller.ApplyResume(resume.Param);
+                    abandonResumed = resume.Controller;
                 }
-                SetPanelRoot(uiPanelConfig.UILayer, go);
-                var rectTransform = go.GetComponent<RectTransform>();
-                rectTransform.FillParent();
-
-                uiPanel.Init(uiPanelConfig);
-                uiPanel.Show(showParam);
-                _uiMap.Add(uiPanelConfig.UIPanelId, uiPanel);
-
-                _events.Emit(UIEvents.PanelShown, uiPanelConfig);
-                onShown?.Invoke(uiPanel);
-            });
-        }
-
-        private void SetPanelRoot(EPanelLayer panelLayer, GameObject uiPanelGo)
-        {
-            GameObject rootGo;
-            switch (panelLayer)
-            {
-                case EPanelLayer.Normal:
-                    rootGo = _normalRoot;
-                    break;
-                case EPanelLayer.Pop:
-                    rootGo = _popRoot;
-                    break;
-                case EPanelLayer.Top:
-                    rootGo = _topRoot;
-                    break;
-                default:
-                    throw new System.ArgumentOutOfRangeException(nameof(panelLayer), panelLayer, null);
+                Arrange(EPanelLayer.Pop);
+                popBlocker.SetActive(pop.Count > 0);
+                return;
             }
-            uiPanelGo.transform.SetParent(rootGo.transform);
+            if (Remove(normal, controller)) Arrange(EPanelLayer.Normal);
+            if (Remove(top, controller)) Arrange(EPanelLayer.Top);
         }
 
-        public void DestoryPanel(UIPanel uiPanel, bool isImmediate = true)
+        // 被盖住时再 Open 不改参数。正是栈顶则换参数并 OnShow。否则先 OnCover 当前栈顶再入栈。
+        void PresentPop(UIViewController controller, IShowParam param)
         {
-            var uiPanelConfig = uiPanel.UIPanelConfig;
-            _uiMap.Remove(uiPanelConfig.UIPanelId);
-            // todo: 这个设计目前还没有太大用处，等待后续有关闭动画的需求再继续实现
-            if (isImmediate)
+            int index = Find(pop, controller);
+            if (index >= 0)
             {
-                uiPanel.Destory();
-                Object.Destroy(uiPanel.gameObject);
-                _resManager.UnloadRes(uiPanelConfig.PrefabPath);
-            
-                _events.Emit(UIEvents.PanelClosed, uiPanelConfig);
+                if (index != pop.Count - 1) return;
+                pop[index].Param = param;
+                controller.ApplyShow(param);
+                return;
+            }
+            Page covered = pop.Count > 0 ? pop[pop.Count - 1] : null;
+            if (covered != null)
+                covered.Controller.ApplyCover();
+            abandonResumed = null;
+            try
+            {
+                ShowNew(pop, controller, param);
+            }
+            catch
+            {
+                RestoreCover(covered, controller);
+                popBlocker.SetActive(pop.Count > 0);
+                throw;
+            }
+
+            RestoreCover(covered, controller);
+            popBlocker.SetActive(pop.Count > 0);
+        }
+
+        // 新页没有留在栈顶时，把刚盖住的那页露出来。Abandon 已经露过的不再露第二次。
+        void RestoreCover(Page covered, UIViewController opened)
+        {
+            var resumed = abandonResumed;
+            abandonResumed = null;
+            if (covered == null) return;
+            if (Find(pop, opened) >= 0 && opened.Life == ViewLife.Shown) return;
+            if (resumed == covered.Controller) return;
+            if (Find(pop, covered.Controller) < 0 || covered.Controller.Life != ViewLife.Shown) return;
+            covered.Controller.ApplyResume(covered.Param);
+        }
+
+        // Normal / Top。已经开着则不关闭，换参数后直接 OnShow。
+        void PresentKept(List<Page> list, UIViewController controller, IShowParam param)
+        {
+            int index = Find(list, controller);
+            if (index >= 0)
+            {
+                list[index].Param = param;
+                controller.ApplyShow(param);
+                return;
+            }
+            ShowNew(list, controller, param);
+        }
+
+        // 加载失败且没有进入 Shown 时，撤销刚写入的记录。
+        void ShowNew(List<Page> list, UIViewController controller, IShowParam param)
+        {
+            list.Add(new Page(controller, param, sequence++));
+            try
+            {
+                controller.ApplyShow(param);
+            }
+            catch
+            {
+                DetachUnshown(list, controller);
+                Arrange(controller.Layer);
+                throw;
+            }
+
+            DetachUnshown(list, controller);
+            Arrange(controller.Layer);
+        }
+
+        // 没进入 Shown 的记录不能留在层里，否则 Close 永远够不着，View 也会挂在层级下。
+        static void DetachUnshown(List<Page> list, UIViewController controller)
+        {
+            if (controller.Life == ViewLife.Shown && Find(list, controller) >= 0)
+                return;
+            if (Find(list, controller) >= 0)
+                Remove(list, controller);
+            if (controller.Life != ViewLife.Shown && controller.Life != ViewLife.Disposed && controller.Life != ViewLife.Hidden)
+                controller.DiscardView();
+        }
+
+        // 键盘 Esc。栈空时什么都不做。
+        internal void CloseTopPop()
+        {
+            if (pop.Count == 0) return;
+            pop[pop.Count - 1].Controller.Close();
+        }
+
+        // Pop 的挡板夹在栈顶和下面几页之间。Normal / Top 按 Order 排，相同 Order 后打开的在上。
+        void Arrange(EPanelLayer layer)
+        {
+            int index = 0;
+            if (layer == EPanelLayer.Pop)
+            {
+                int last = pop.Count - 1;
+                for (int i = 0; i < last; i++)
+                    Place(pop[i], index++);
+                popBlocker.transform.SetSiblingIndex(index++);
+                if (last >= 0)
+                    Place(pop[last], index);
+                return;
+            }
+            var list = ListOf(layer);
+            var sorted = new List<Page>(list);
+            sorted.Sort(Compare);
+            for (int i = 0; i < sorted.Count; i++)
+                Place(sorted[i], index++);
+        }
+
+        static void Place(Page page, int index)
+        {
+            var view = page.Controller.ViewTransform;
+            if (view != null) view.SetSiblingIndex(index);
+        }
+
+        static int Compare(Page a, Page b)
+        {
+            int order = a.Controller.Order.CompareTo(b.Controller.Order);
+            return order != 0 ? order : a.Sequence.CompareTo(b.Sequence);
+        }
+
+        List<Page> ListOf(EPanelLayer layer)
+        {
+            if (layer == EPanelLayer.Pop) return pop;
+            if (layer == EPanelLayer.Top) return top;
+            return normal;
+        }
+
+        static int Find(List<Page> list, UIViewController controller)
+        {
+            for (int i = 0; i < list.Count; i++)
+                if (list[i].Controller == controller) return i;
+            return -1;
+        }
+
+        static bool Remove(List<Page> list, UIViewController controller)
+        {
+            int index = Find(list, controller);
+            if (index < 0) return false;
+            list.RemoveAt(index);
+            return true;
+        }
+
+        UIView Load(string path, EPanelLayer layer)
+        {
+            var prefab = Resources.Load<GameObject>(path);
+            if (prefab == null)
+                throw new InvalidOperationException($"找不到界面 Prefab：{path}");
+            var parent = layer == EPanelLayer.Pop ? popRoot : layer == EPanelLayer.Top ? topRoot : normalRoot;
+            var go = UnityEngine.Object.Instantiate(prefab, parent);
+            go.SetActive(true);
+            var view = go.GetComponent<UIView>();
+            if (view == null)
+            {
+                UnityEngine.Object.Destroy(go);
+                throw new InvalidOperationException($"Prefab {path} 上没有 UIView。");
+            }
+            return view;
+        }
+
+        static Transform CreateLayer(Transform root, string name, int sortingOrder)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+            go.transform.SetParent(root, false);
+            var canvas = go.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = sortingOrder;
+            var scaler = go.GetComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920f, 1080f);
+            scaler.matchWidthOrHeight = 0.5f;
+            return go.transform;
+        }
+
+        static GameObject CreateBlocker(Transform parent, string name)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(Image));
+            go.transform.SetParent(parent, false);
+            var rect = go.GetComponent<RectTransform>();
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = Vector2.zero;
+            rect.offsetMax = Vector2.zero;
+            var image = go.GetComponent<Image>();
+            image.color = new Color(0f, 0f, 0f, 0f);
+            image.raycastTarget = true;
+            go.SetActive(false);
+            return go;
+        }
+
+        sealed class Page
+        {
+            public UIViewController Controller { get; }
+            public IShowParam Param;
+            public int Sequence { get; }
+
+            public Page(UIViewController controller, IShowParam param, int sequence)
+            {
+                Controller = controller;
+                Param = param;
+                Sequence = sequence;
             }
         }
-
-        #region 分辨率调整功能
-
-        /// <summary>
-        /// 设置屏幕分辨率
-        /// </summary>
-        /// <param name="width">宽度</param>
-        /// <param name="height">高度</param>
-        /// <param name="fullscreen">是否全屏</param>
-        private void SetScreenResolution(int width, int height, bool fullscreen = false)
-        {
-            Screen.SetResolution(width, height, fullscreen);
-            Debug.Log($"分辨率已设置为: {width}x{height}, 全屏: {fullscreen}");
-        }
-
-        /// <summary>
-        /// 设置屏幕分辨率（使用预设配置）
-        /// </summary>
-        public void SetScreenResolution(ResolutionInfo resolutionInfo)
-        {
-            SetScreenResolution(resolutionInfo.Width, resolutionInfo.Height, resolutionInfo.Fullscreen);
-        }
-
-        /// <summary>
-        /// 设置 UI 参考分辨率（不改变屏幕分辨率）
-        /// </summary>
-        /// <param name="width">参考宽度</param>
-        /// <param name="height">参考高度</param>
-        public void SetUIReferenceResolution(float width, float height)
-        {
-            if (_canvasScaler != null)
-            {
-                _canvasScaler.referenceResolution = new Vector2(width, height);
-                Debug.Log($"UI 参考分辨率已设置为: {width}x{height}");
-            }
-        }
-
-        /// <summary>
-        /// 设置 CanvasScaler 的匹配模式
-        /// </summary>
-        /// <param name="matchWidthOrHeight">0 为匹配宽度，1 为匹配高度，0.5 为平衡</param>
-        public void SetMatchWidthOrHeight(float matchWidthOrHeight)
-        {
-            if (_canvasScaler != null)
-            {
-                _canvasScaler.matchWidthOrHeight = Mathf.Clamp01(matchWidthOrHeight);
-                Debug.Log($"MatchWidthOrHeight 已设置为: {matchWidthOrHeight}");
-            }
-        }
-
-        /// <summary>
-        /// 获取当前屏幕分辨率信息
-        /// </summary>
-        public string GetCurrentResolutionInfo()
-        {
-            return $"当前分辨率: {Screen.width}x{Screen.height}, 全屏: {Screen.fullScreen}";
-        }
-
-        /// <summary>
-        /// 获取 UI 参考分辨率信息
-        /// </summary>
-        public string GetUIReferenceResolutionInfo()
-        {
-            if (_canvasScaler != null)
-            {
-                var refRes = _canvasScaler.referenceResolution;
-                return $"UI 参考分辨率: {refRes.x}x{refRes.y}, Match: {_canvasScaler.matchWidthOrHeight:F2}";
-            }
-            return "CanvasScaler 未初始化";
-        }
-
-        #endregion
     }
 }

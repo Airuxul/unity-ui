@@ -8,10 +8,9 @@ namespace Air.UI
     /// <summary>
     /// UI组件基类，提供UI生命周期管理
     /// </summary>
-    public abstract class UIComponent : MonoBehaviour, IUIScopedEvents
+    public abstract class UIComponent : MonoBehaviour
     {
-        [SerializeField] 
-        private UIComponent parent;
+        UIComponent parent;
 
         public UIComponent Parent
         {
@@ -19,32 +18,41 @@ namespace Air.UI
             get => parent;
         }
 
-        [SerializeField]
-        protected List<UIComponent> childs = new();
+        readonly List<UIComponent> childs = new();
 
         private List<UIComponent> Childs => childs;
 
-        private bool IsInit { get; set; }
-        public bool IsDestoryed { get; set; }
-
-        public IUIShowParam UIShowParam { get; set; }
+        public IShowParam ShowParam { get; set; }
 
         protected UITriggerCtrl TriggerCtrl;
         protected UIStateCtrl StateCtrl;
 
         #region UI生命周期
-        
-        protected void Init()
+
+        public void Init()
         {
-            if (IsInit) return;
-            IsInit = true;
-            IsDestoryed = false;
             InitOtherComponent();
+            childs.Clear();
+            Bind();
             foreach (var child in Childs)
             {
                 child?.Init();
             }
-            OnUIInit();
+
+            OnInit();
+        }
+
+        public virtual void Bind()
+        {
+        }
+
+        protected void AddComponent(UIComponent child)
+        {
+            if (child == null)
+                return;
+            child.Parent = this;
+            if (!childs.Contains(child))
+                childs.Add(child);
         }
 
         private void InitOtherComponent()
@@ -53,128 +61,68 @@ namespace Air.UI
             {
                 // StateCtrl.Init();
             }
-            
+
             if (TryGetComponent(out TriggerCtrl))
             {
                 // TriggerCtrl.Init();
             }
         }
 
-        /// <summary>
-        /// 页面加载完实例化逻辑
-        /// </summary>
-        /// <param name="param"></param>
-        public void Show(IUIShowParam param = null)
+        public void Show(IShowParam param = null)
         {
-            UIShowParam = param;
+            ShowParam = param;
             foreach (var child in Childs)
             {
                 child?.Show(param);
             }
-            OnUIShow(param);
-            // 播放显示动画
+            OnShow(param);
             TriggerCtrl?.TriggerUIPanelShow();
         }
 
-        /// <summary>
-        /// 页面展示动画结束时的回调逻辑
-        /// </summary>
         public void ShowAfter()
         {
             foreach (var child in Childs)
             {
                 child?.ShowAfter();
             }
-            OnUIShowAfter();
+            OnShowAfter();
         }
 
-        /// <summary>
-        /// 页面重新回到最顶上
-        /// </summary>
-        public void Resume()
-        {
-            foreach (var child in Childs)
-            {
-                child?.Show(UIShowParam);
-            }
-            OnUIShow(UIShowParam);
-        }
-
-        /// <summary>
-        /// 页面隐藏逻辑
-        /// </summary>
         public void Hide()
         {
-            OnUIHide();
-            foreach (var child in Childs)
-            {
-                child?.Destory();
-            }
-            // todo hide动画
+            OnHide();
+            for (int i = 0; i < childs.Count; i++)
+                childs[i]?.Hide();
         }
 
-        /// <summary>
-        /// 销毁页面
-        /// </summary>
-        public void Destory()
+        public void DestroyView()
         {
-            OnUIDestory();
-            this.ClearEvents();
-            IsInit = false;
-            IsDestoryed = true;
+            OnDispose();
             foreach (var child in Childs)
             {
-                child?.Destory();
+                child?.DestroyView();
             }
         }
 
-        /// <summary>
-        /// 初始化UI组件
-        /// </summary>
-        protected virtual void OnUIInit()
+        protected virtual void OnInit()
         {
-            // 子类可以重写此方法进行初始化逻辑
         }
 
-        /// <summary>
-        /// 显示UI组件
-        /// </summary>
-        protected virtual void OnUIShow(IUIShowParam param = null)
+        protected virtual void OnShow(IShowParam param = null)
         {
-            // 子类可以重写此方法进行显示逻辑
         }
 
-        
-        /// <summary>
-        /// 显示完UI组件后回调
-        /// </summary>
-        protected virtual void OnUIShowAfter()
+        protected virtual void OnShowAfter()
         {
-            // 子类可以重写此方法进行动画展示完后的逻辑
         }
 
-        /// <summary>
-        /// 隐藏UI组件
-        /// </summary>
-        protected virtual void OnUIHide()
+        protected virtual void OnHide()
         {
-            // 子类可以重写此方法进行隐藏逻辑
         }
 
-        /// <summary>
-        /// 销毁UI组件
-        /// </summary>
-        protected virtual void OnUIDestory()
+        protected virtual void OnDispose()
         {
-            
         }
-        #endregion
-
-        #region 事件
-        UIScopedEvents _scopedEvents;
-
-        public UIScopedEvents ScopedEvents =>
-            _scopedEvents ??= new UIScopedEvents(UIFramework.Current.Events);
         #endregion
     }
 }

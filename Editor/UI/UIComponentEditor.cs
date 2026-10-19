@@ -29,7 +29,7 @@ namespace Air.UI.Editor
                 if (!string.IsNullOrEmpty(designerScriptPath))
                 {
                     string outputFolder = Path.GetDirectoryName(designerScriptPath);
-                    UIType uiType = target is UIPanel? UIType.Panel: UIType.Component;
+                    UIType uiType = className.EndsWith("View") ? UIType.Panel : UIType.Component;
                     UIScriptGenerator.GenerateUIScript(uiComponent.gameObject, uiComponent.GetType().Name, outputFolder, uiType);
                 }
                 else

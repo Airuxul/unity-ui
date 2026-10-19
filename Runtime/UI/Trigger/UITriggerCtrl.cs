@@ -97,7 +97,7 @@ namespace Air.UI.Trigger
         {
             if (bindings != null) return;
             bindings = new List<TriggerBinding>();
-            if (!TryGetComponent<UIPanel>(out var uiPanel))
+            if (!TryGetComponent<UIView>(out var view))
             {
                 return;
             }
@@ -115,38 +115,18 @@ namespace Air.UI.Trigger
                     true)
             );
             var panelShowAfterEvent = new UnityEvent();
-            panelShowAfterEvent.AddListener(uiPanel.ShowAfter);
+            panelShowAfterEvent.AddListener(view.ShowAfter);
             showUITriggerBinding.Actions.Add(
                 new EventTriggerAction(panelShowAfterEvent)
             );
-            
-            // 添加默认关闭页面动画和事件逻辑
-            var closeUITriggerBinding = new TriggerBinding
-            {
-                BindingName = "HideUI"
-            };
-            closeUITriggerBinding.Actions.Add(
-                new AnimationTriggerAction(
-                    AnimationTriggerAction.AnimationSourceType.AnimatorTrigger,
-                    gameObject,
-                    "UIPanelHide",
-                    true)
-            );
-            var panelCloseAfterEvent = new UnityEvent();
-            panelCloseAfterEvent.AddListener(uiPanel.ShowAfter);
-            closeUITriggerBinding.Actions.Add(
-                new EventTriggerAction(panelCloseAfterEvent)
-            );
-            
+
             bindings.Add(showUITriggerBinding);
-            bindings.Add(closeUITriggerBinding);
         }
 
         private void RebindDefaultCallbacks()
         {
-            if (!TryGetComponent<UIPanel>(out var uiPanel) || bindings == null) return;
-            RebindDefaultEvent("ShowUI", uiPanel.ShowAfter);
-            RebindDefaultEvent("HideUI", uiPanel.ShowAfter);
+            if (!TryGetComponent<UIView>(out var view) || bindings == null) return;
+            RebindDefaultEvent("ShowUI", view.ShowAfter);
         }
 
         private void RebindDefaultEvent(string bindingName, UnityAction callback)

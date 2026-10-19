@@ -1,11 +1,12 @@
 using System;
-using Air.UnityConnector.Cli;
-using Air.UnityConnector.Invoke;
+using Air.UcpAgent.Cli;
+using Air.UcpAgent.Invoke;
 using Air.UI.Editor;
+using UnityEngine;
 
 namespace Air.UI.Editor.Cli
 {
-    /// <summary>unity-cmd: generate UIPanel/UIComponent scripts from a prefab (AirUI generator).</summary>
+    /// <summary>unity-cmd: generate UIView scripts from a prefab (AirUI generator).</summary>
     public sealed class UiGenerateScriptCommand : CliCommand<UiGenerateScriptParams>
     {
         public const string CommandName = "ui.generate";
@@ -33,6 +34,7 @@ namespace Air.UI.Editor.Cli
                     p.ClassName,
                     uiType,
                     p.RootName,
+                    p.Node,
                     p.StripPanel ?? true,
                     p.RefreshDesigner ?? true,
                     options);
@@ -41,7 +43,8 @@ namespace Air.UI.Editor.Cli
             }
             catch (Exception ex)
             {
-                CompleteFail(ex.Message);
+                Debug.LogException(ex);
+                CompleteFail(ex.ToString());
             }
         }
 

@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-**L2 UI 层** — UI 面板、组件生命周期、可视化 State/Trigger 与编辑器脚本生成。通过 [`com.air.unity-game-core`](../com.air.unity-game-core/README.md) 使用 `GameRuntime`、`EventBus` 与资源加载（请勿在本包重复实现）。
+**L2 UI 层** — View、ViewController、可视化 State/Trigger 与编辑器脚本生成。通过 [`com.air.unity-game-core`](../com.air.unity-game-core/README.md) 使用 `ViDelegation`。
 
 ## 安装
 
@@ -14,85 +14,33 @@
 
 若尚未安装，请同时添加 `com.air.unity-game-core`。子模块目录见 [meta registry](https://github.com/Airuxul/AirUnityPackage/blob/main/config/registry.json)。
 
-## 快速开始（`GameEntry`）
-
-```csharp
-using Air.UI;
-using Air.UnityGameCore.Runtime;
-
-using var entry = GameEntry.CreateWithUI();
-entry.Runtime.Events.On("game.ready", () => { });
-entry.UI.Panels.ShowPanel(config, showParam);
-
-// 栈式导航（Normal / Pop / Top 层）
-entry.UI.Navigator.Push(settingsConfig, null, panel => { /* 已加载 */ });
-entry.UI.Navigator.Pop();
-```
-
-`GameEntry` 会创建默认 `GameRuntime`、调用 `UIFramework.Install(runtime)`，并在 `Dispose()` 时一并释放。
-
-## 手动安装（`UIFramework`）
-
-```csharp
-var runtime = GameRuntime.CreateDefault();
-var ui = UIFramework.Install(runtime);
-ui.Panels.ShowPanel(config, showParam);
-// ...
-UIFramework.Uninstall();
-runtime.Dispose();
-```
-
 ## 运行时 API
+
+游戏自己创建管理器，用 Prefab 路径和 `EPanelLayer` 注册 `UIViewController<TView>`。`Open` 加载 `UIView`。`Close` 销毁这一次的实例。
 
 | 类型 | 作用 |
 |------|------|
-| `GameEntry` | 一次性组合 `GameRuntime` + `UIFramework` |
-| `UIFramework` | 子系统入口：`Panels`、`Navigator`、`Events`（运行时总线） |
-| `UIManager` | UI 根节点、Normal/Pop/Top 层、显示/隐藏/销毁面板 |
-| `UIPanel` / `UIComponent` | 面板与控件生命周期 |
-| `UIPanelNavigator` | 栈式 Push/Pop（会隐藏上一层） |
-| `UIScopedEvents` | 组件级 `EventBus` 订阅与自动清理 |
+| `UIView` | Prefab 上的页面或可复用块 |
+| `UIViewController<TView>` | 整个会话都在的控制器。`TView` 是 `UIView`，`View` 持有当前实例 |
+| `UIComponent` | 共用的初始化、显示、隐藏、销毁钩子 |
+| `EPanelLayer` | `Normal`、`Pop`、`Top` |
 | `UIStateCtrl` / `UITriggerCtrl` | 可视化状态与触发器 |
-| `UIEvents` | 全局面板显示/关闭事件名 |
 
-## 作用域 UI 事件
-
-```csharp
-public partial class MyPanel : UIPanel
-{
-    protected override void OnUIInit()
-    {
-        this.On("custom.event", OnCustom);
-    }
-
-    void OnCustom() { }
-
-    protected override void OnUIDestory() => this.ClearEvents();
-}
-```
-
-## 全局 UI 事件名
-
-- `UIEvents.PanelShown` — `ui.panel.shown`
-- `UIEvents.PanelClosed` — `ui.panel.closed`
+`comp_` 子组件在生成的 `Bind()` 里用 `AddComponent` 接上，不再序列化父子列表。
 
 ## 编辑器
 
-- **Window → AirUI → UI Script Generator** — 从层级生成面板/组件逻辑脚本
-- UI 组件右键菜单快捷入口（见 `UIGeneratorContextMenu`）
+选中 View 组件。**Regenerate Designer** 重写 Designer。**Bind Fields** 按前缀绑定节点。
 
-## unity-cmd
+## ucp-cli（可选）
+
+工程里另外安装了 `com.air.ucp-agent` 时，才会编译 `ui.generate`。本包不依赖命令平台。
 
 ```bash
-unity-cmd --profile editor ui.generate \
-  --prefab_path Assets/UI/MyPanel.prefab \
-  --output_folder Assets/Scripts/UI/Panels \
-  --class_name MyPanel \
-  --namespace MyGame.UI \
-  --ui_type panel
+ucp-cli run ui.generate --args "{\"prefab_path\":\"Assets/UI/MyPanel.prefab\",\"output_folder\":\"Assets/Scripts/UI/Panels\",\"class_name\":\"MyPanel\",\"namespace\":\"MyGame.UI\",\"ui_type\":\"panel\"}"
 ```
 
-命令实现：`Editor/Cli/UiGenerateScriptCommand.cs`（依赖 `com.air.unity-connector` 发现机制）。
+命令实现：`Editor/Cli/UiGenerateScriptCommand.cs`（`CliCommandDiscovery` 自动发现）。
 
 ## 依赖
 

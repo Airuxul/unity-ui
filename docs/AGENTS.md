@@ -8,8 +8,8 @@
 |-------|--------|
 | **UPM id** | `com.air.unity-ui` |
 | **Layer** | L2 UI |
-| **Depends on** | `com.air.unity-game-core` (runtime: `GameRuntime`, `EventBus`, `IResManager`) |
-| **Must not** | Duplicate `EventBus` or resource loading; no CLI protocol |
+| **Depends on** | `com.air.unity-game-core` (runtime: `ViDelegation`) |
+| **Must not** | Duplicate `EventManager` or resource loading; no CLI protocol |
 
 ## User documentation
 
@@ -33,8 +33,8 @@
 
 | Path | Contents |
 |------|----------|
-| `Runtime/` | `GameEntry`, `UIFramework`, `UIManager`, `UIPanel`, `UIScopedEvents`, `UI/State/`, `UI/Trigger/` |
-| `Editor/UI/` | Script generator (`UIGeneratorWindow`), serializers, state/trigger inspectors |
+| `Runtime/` | `UIView`, `UIViewController`, `UIComponent`, `EPanelLayer`, `UI/State/`, `UI/Trigger/` |
+| `Editor/UI/` | Inspector script generator, serializers, state/trigger inspectors |
 
 Namespace: `Air.UI` (runtime), `Air.UI.Editor` (editor).
 

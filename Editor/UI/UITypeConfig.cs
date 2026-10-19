@@ -56,7 +56,7 @@ namespace Air.UI.Editor
                     DisplayName = "Panel",
                     FolderName = "Panels",
                     TemplateFileName = "UIPanelLogicTemplate.txt",
-                    BaseClassName = "UIPanel",
+                    BaseClassName = "UIView",
                     Namespace = "Air.UI.Generated"
                 }
             },

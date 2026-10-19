@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Text;
 using System.Collections.Generic;
+using TMPro;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UI;
@@ -189,10 +190,7 @@ namespace Air.UI.Editor
             var kept = new List<string>(lines.Length);
             foreach (var line in lines)
             {
-                if (line.Contains("private Image ", StringComparison.Ordinal))
-                    continue;
-                if (line.Contains("caption", StringComparison.OrdinalIgnoreCase)
-                    && line.Contains("private Text ", StringComparison.Ordinal))
+                if (IsPrunedDecoration(line))
                     continue;
                 kept.Add(line);
             }
@@ -222,14 +220,22 @@ namespace Air.UI.Editor
             // 替换字段
             if (template.Contains("#FIELDS#"))
             {
-                StringBuilder fieldsBuilder = new StringBuilder();
+                var fieldsBuilder = new StringBuilder();
+                foreach (ComponentField field in fields)
+                    fieldsBuilder.AppendLine($"        [SerializeField] protected {field.fieldType} {field.fieldName};");
+
+                fieldsBuilder.AppendLine();
+                fieldsBuilder.AppendLine("        public override void Bind()");
+                fieldsBuilder.AppendLine("        {");
                 foreach (ComponentField field in fields)
                 {
-                    // 为字段生成标准格式
-                    fieldsBuilder.AppendLine($"\t\t[SerializeField] private {field.fieldType} {field.fieldName};");
+                    if (!field.childComponent)
+                        continue;
+                    fieldsBuilder.AppendLine($"            AddComponent({field.fieldName});");
                 }
 
-                template = template.Replace("#FIELDS#", fieldsBuilder.ToString().TrimEnd());
+                fieldsBuilder.Append("        }");
+                template = template.Replace("#FIELDS#", fieldsBuilder.ToString());
             }
 
             return template;
@@ -284,14 +290,7 @@ namespace Air.UI.Editor
         /// </summary>
         /// <param name="name">GameObject名称</param>
         /// <returns>字段名</returns>
-        private static string ToFieldName(string name)
-        {
-            if (string.IsNullOrEmpty(name))
-                return name;
-
-            // 首字母转小写
-            return char.ToLower(name[0]) + name.Substring(1);
-        }
+        private static string ToFieldName(string name) => name;
 
         private static List<ComponentField> CollectComponentFields(GameObject targetGo)
         {
@@ -308,17 +307,11 @@ namespace Air.UI.Editor
         /// <returns></returns>
         private static void ProcessFieldsSameName(List<ComponentField> fields)
         {
-            var fieldName2Field = new Dictionary<string, ComponentField>();
+            var seen = new HashSet<string>();
             foreach (var field in fields)
             {
-                if (fieldName2Field.TryAdd(field.fieldName, field))
-                {
-                    continue;
-                }
-
-                var preField = fieldName2Field[field.fieldName];
-                preField.fieldName = $"{preField.fieldName}{preField.fieldType}";
-                field.fieldName = $"{field.fieldName}{field.fieldType}";
+                if (!seen.Add(field.fieldName))
+                    throw new Exception($"Duplicate UI bind name: {field.fieldName}");
             }
         }
 
@@ -328,57 +321,161 @@ namespace Air.UI.Editor
         private static void CollectComponentFieldsRecursive(Transform transform, List<ComponentField> fields,
             string path)
         {
-            if (IsButtonCaptionChild(transform))
-            {
+            var isFirst = string.IsNullOrEmpty(path);
+            var currentPath = isFirst ? transform.name : $"{path}/{transform.name}";
+            if (!isFirst && TryCollectPrefixed(transform, fields))
                 return;
+
+            for (var i = 0; i < transform.childCount; i++)
+                CollectComponentFieldsRecursive(transform.GetChild(i), fields, currentPath);
+        }
+
+        static bool TryCollectPrefixed(Transform transform, List<ComponentField> fields)
+        {
+            var name = transform.name;
+            if (!UIBindPrefixes.TryMatch(name, out var kind))
+                return false;
+
+            if (kind == UIBindKind.GameObject)
+            {
+                fields.Add(new ComponentField(name, nameof(GameObject)));
+                return FindBlock(transform) != null;
             }
 
-            Component[] components = transform.GetComponents<Component>();
-            List<ComponentField> newFields = new List<ComponentField>();
-            var isFirst = string.IsNullOrEmpty(path);
-            var curObjName = transform.name;
-            var currentPath = isFirst ? transform.name : $"{path}/{transform.name}";
-            var hasButton = transform.GetComponent<Button>() != null;
-            foreach (var component in components)
+            if (kind == UIBindKind.View)
             {
-                var componentType = component.GetType();
-                if (!UIComponentTypes.IsBasicType(componentType))
-                    continue;
-                if (hasButton && componentType == typeof(Image))
-                    continue;
-                var fieldName = ToFieldName(curObjName);
-                var isUIComp = UIComponentTypes.IsUIComponent(componentType);
-                var newFiled = new ComponentField(fieldName, componentType.Name);
-                // 如果是组件的话，除根节点外，其它直接退出
-                if (isUIComp)
+                var block = FindBlock(transform);
+                if (block == null)
                 {
-                    if (isFirst)
-                    {
-                        continue;
-                    }
-
-                    fields.Add(newFiled);
-                    return;
+                    Debug.LogWarning($"UI bind skipped, {name} has no UIComponent.");
+                    return false;
                 }
 
-                newFields.Add(newFiled);
+                fields.Add(new ComponentField(name, block.GetType().Name, true));
+                return true;
             }
 
-            fields.AddRange(newFields);
-            for (var i = 0; i < transform.childCount; i++)
+            var component = FindBindComponent(transform, kind);
+            if (component == null)
             {
-                var child = transform.GetChild(i);
-                CollectComponentFieldsRecursive(child, fields, currentPath);
+                Debug.LogWarning($"UI bind skipped, {name} is missing {kind}.");
+                return false;
             }
+
+            fields.Add(new ComponentField(name, component.GetType().Name));
+            return false;
         }
 
-        static bool IsButtonCaptionChild(Transform transform)
+        static bool IsPrunedDecoration(string line)
         {
-            var parent = transform.parent;
-            if (parent == null)
+            if (line.Contains("img_", StringComparison.Ordinal) || line.Contains("txt_", StringComparison.Ordinal))
                 return false;
-            return parent.GetComponent<Button>() != null && transform.GetComponent<Text>() != null;
+            if (line.Contains("protected Image ", StringComparison.Ordinal))
+                return true;
+            return line.Contains("caption", StringComparison.OrdinalIgnoreCase)
+                && line.Contains("protected Text ", StringComparison.Ordinal);
         }
+
+        // comp_ / go_ 自己带了界面组件时，子节点属于那一块，父级字段不能绑进去。
+        internal static bool HidesDescendants(Transform transform)
+        {
+            if (!UIBindPrefixes.TryMatch(transform.name, out var kind))
+                return false;
+            if (kind != UIBindKind.View && kind != UIBindKind.GameObject)
+                return false;
+            return FindBlock(transform) != null;
+        }
+
+        static UIComponent FindBlock(Transform transform)
+        {
+            UIComponent found = null;
+            foreach (var component in transform.GetComponents<UIComponent>())
+            {
+                var type = component.GetType();
+                if (type == typeof(UIComponent) || type == typeof(UIView))
+                    continue;
+                if (found == null || type.IsSubclassOf(found.GetType()))
+                    found = component;
+            }
+
+            return found;
+        }
+
+        static Component FindBindComponent(Transform transform, UIBindKind kind)
+        {
+            var expected = UIBindPrefixes.ComponentType(kind);
+            if (expected != null)
+            {
+                var component = transform.GetComponent(expected);
+                if (component != null)
+                    return component;
+            }
+
+            if (kind == UIBindKind.Text)
+                return transform.GetComponent<TMP_Text>();
+            if (kind == UIBindKind.Input)
+                return transform.GetComponent<TMP_InputField>();
+            if (kind == UIBindKind.Dropdown)
+                return transform.GetComponent<TMP_Dropdown>();
+            return null;
+        }
+    }
+
+    public enum UIBindKind
+    {
+        Text,
+        TextMesh,
+        Image,
+        Button,
+        Toggle,
+        Slider,
+        Input,
+        Dropdown,
+        Scroll,
+        Scrollbar,
+        CanvasGroup,
+        GameObject,
+        View
+    }
+
+    public static class UIBindPrefixes
+    {
+        public static bool TryMatch(string nodeName, out UIBindKind kind)
+        {
+            kind = default;
+            if (string.IsNullOrEmpty(nodeName))
+                return false;
+            if (nodeName.StartsWith("txt_", StringComparison.Ordinal)) { kind = UIBindKind.Text; return true; }
+            if (nodeName.StartsWith("tmp_", StringComparison.Ordinal)) { kind = UIBindKind.TextMesh; return true; }
+            if (nodeName.StartsWith("img_", StringComparison.Ordinal)) { kind = UIBindKind.Image; return true; }
+            if (nodeName.StartsWith("btn_", StringComparison.Ordinal)) { kind = UIBindKind.Button; return true; }
+            if (nodeName.StartsWith("tog_", StringComparison.Ordinal)) { kind = UIBindKind.Toggle; return true; }
+            if (nodeName.StartsWith("sld_", StringComparison.Ordinal)) { kind = UIBindKind.Slider; return true; }
+            if (nodeName.StartsWith("ipt_", StringComparison.Ordinal)) { kind = UIBindKind.Input; return true; }
+            if (nodeName.StartsWith("drop_", StringComparison.Ordinal)) { kind = UIBindKind.Dropdown; return true; }
+            if (nodeName.StartsWith("scr_", StringComparison.Ordinal)) { kind = UIBindKind.Scroll; return true; }
+            if (nodeName.StartsWith("bar_", StringComparison.Ordinal)) { kind = UIBindKind.Scrollbar; return true; }
+            if (nodeName.StartsWith("grp_", StringComparison.Ordinal)) { kind = UIBindKind.CanvasGroup; return true; }
+            if (nodeName.StartsWith("go_", StringComparison.Ordinal)) { kind = UIBindKind.GameObject; return true; }
+            if (nodeName.StartsWith("comp_", StringComparison.Ordinal)) { kind = UIBindKind.View; return true; }
+            return false;
+        }
+
+        public static Type ComponentType(UIBindKind kind) => kind switch
+        {
+            UIBindKind.Text => typeof(Text),
+            UIBindKind.TextMesh => typeof(TextMeshProUGUI),
+            UIBindKind.Image => typeof(Image),
+            UIBindKind.Button => typeof(Button),
+            UIBindKind.Toggle => typeof(Toggle),
+            UIBindKind.Slider => typeof(Slider),
+            UIBindKind.Input => typeof(InputField),
+            UIBindKind.Dropdown => typeof(Dropdown),
+            UIBindKind.Scroll => typeof(ScrollRect),
+            UIBindKind.Scrollbar => typeof(Scrollbar),
+            UIBindKind.CanvasGroup => typeof(CanvasGroup),
+            _ => null
+        };
     }
 
     /// <summary>
@@ -397,10 +494,13 @@ namespace Air.UI.Editor
         /// </summary>
         public string fieldType;
 
-        public ComponentField(string fieldName, string fieldType)
+        public bool childComponent;
+
+        public ComponentField(string fieldName, string fieldType, bool childComponent = false)
         {
             this.fieldName = fieldName;
             this.fieldType = fieldType;
+            this.childComponent = childComponent;
         }
     }
 }

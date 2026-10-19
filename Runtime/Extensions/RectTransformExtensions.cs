@@ -5,7 +5,8 @@ namespace Air.UI.Extensions
     public static class RectTransformExtensions
     {
         /// <summary>
-        /// 濉厖鐖惰妭鐐?        /// </summary>
+        /// 填充父节点
+        /// </summary>
         public static void FillParent(this RectTransform rectTransform)
         {
             rectTransform.anchorMin = Vector2.zero;

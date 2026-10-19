@@ -20,6 +20,7 @@ namespace Air.UI.Editor
             string className,
             UIType uiType,
             string rootName,
+            string nodeName,
             bool stripPanelComponents,
             bool deleteDesignerFirst,
             UiGenerateScriptOptions options)
@@ -45,10 +46,11 @@ namespace Air.UI.Editor
                 if (!string.IsNullOrEmpty(rootName) && root.name != rootName)
                     root.name = rootName;
 
-                className ??= root.name;
+                var target = FindNode(root.transform, nodeName).gameObject;
+                className ??= target.name;
 
                 if (stripPanelComponents)
-                    StripPanelComponents(root);
+                    StripPanelComponents(target);
 
                 if (deleteDesignerFirst)
                     DeleteDesignerScript(outputFolder, className);
@@ -58,7 +60,7 @@ namespace Air.UI.Editor
 
                 options.PrefabPipelineAttach = true;
                 UIScriptGenerator.GenerateUIScript(
-                    root,
+                    target,
                     className,
                     outputFolder,
                     uiType,
@@ -68,7 +70,7 @@ namespace Air.UI.Editor
                     File.WriteAllText(logicPath, preservedLogic, Utf8WithBom);
 
                 if (!UISerializer.TryAttachAndBindPrefabRoot(
-                        root, className, options.NamespaceOverride ?? DefaultGeneratedNamespace))
+                        target, className, options.NamespaceOverride ?? DefaultGeneratedNamespace))
                 {
                     UISerializer.AddPendingPrefabAttachment(
                         prefabAssetPath, className, options.NamespaceOverride ?? DefaultGeneratedNamespace);
@@ -92,6 +94,26 @@ namespace Air.UI.Editor
             {
                 PrefabUtility.UnloadPrefabContents(root);
             }
+        }
+
+        static Transform FindNode(Transform root, string name)
+        {
+            if (string.IsNullOrWhiteSpace(name) || name == ".")
+                return root;
+
+            Transform found = null;
+            foreach (var current in root.GetComponentsInChildren<Transform>(true))
+            {
+                if (current.name != name)
+                    continue;
+                if (found != null)
+                    throw new InvalidOperationException($"节点 {name} 不唯一。");
+                found = current;
+            }
+
+            if (found == null)
+                throw new InvalidOperationException($"找不到节点 {name}。");
+            return found;
         }
 
         static string ReadPreservedLogic(string logicPath, UiGenerateScriptOptions options)

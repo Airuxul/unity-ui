@@ -2,8 +2,10 @@
   "name": "com.air.UnityUI.Runtime",
   "rootNamespace": "Air.UI",
   "references": [
+    "com.air.GameCore",
     "com.air.UnityGameCore.Runtime",
-    "UnityEngine.UI"
+    "UnityEngine.UI",
+    "Unity.TextMeshPro"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

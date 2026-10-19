@@ -154,7 +154,7 @@ namespace Air.UI.Editor
             if (!uiComponent) return;
             
             var componentType = uiComponent.GetType();
-            var fields = componentType.GetFields(BindingFlags.NonPublic | BindingFlags.Instance);
+            var fields = componentType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
             
             int clearedCount = 0;
             foreach (var field in fields)
@@ -188,7 +188,7 @@ namespace Air.UI.Editor
             if (!uiComponent) return;
             
             var componentType = uiComponent.GetType();
-            var fieldInfos = componentType.GetFields(BindingFlags.NonPublic | BindingFlags.Instance);
+            var fieldInfos = componentType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
             
             int boundCount = 0;
             int failedCount = 0;
@@ -207,51 +207,8 @@ namespace Air.UI.Editor
                 }
             }
 
-            // 绑定UIComponent基类的childs字段
-            BindBaseChildsField(uiComponent);
-
-            uiComponent.BindParentUIComponent();
-            
             Debug.Log($"Binding complete for {componentType.Name}: {boundCount} bound, {failedCount} failed");
             EditorUtility.SetDirty(uiComponent);
-        }
-        
-        /// <summary>
-        /// 绑定UIComponent基类的childs字段
-        /// </summary>
-        /// <param name="uiComponent">UI组件实例</param>
-        private static void BindBaseChildsField(UIComponent uiComponent)
-        {
-            // 获取基类UIComponent中的childs字段
-            FieldInfo childsField = typeof(UIComponent).GetField("childs", 
-                BindingFlags.NonPublic | BindingFlags.Instance);
-            
-            if (childsField == null)
-            {
-                Debug.LogWarning("Could not find childs field in UIComponent base class");
-                return;
-            }
-            
-            // 收集所有直接子UIComponent
-            List<UIComponent> childsList = new List<UIComponent>();
-            Transform transform = uiComponent.transform;
-            
-            for (int i = 0; i < transform.childCount; i++)
-            {
-                Transform child = transform.GetChild(i);
-                if (child.TryGetComponent<UIComponent>(out var childUIComponent))
-                {
-                    childsList.Add(childUIComponent);
-                }
-            }
-            
-            // 设置childs字段值
-            childsField.SetValue(uiComponent, childsList);
-            
-            if (childsList.Count > 0)
-            {
-                Debug.Log($"Bound base childs field with {childsList.Count} child UIComponents");
-            }
         }
 
         public static EBindStatus BindUIComponentField(this UIComponent uiComponent, FieldInfo fieldInfo)
@@ -271,6 +228,15 @@ namespace Air.UI.Editor
             }
                     
             // 只处理Component类型的字段
+            if (fieldType == typeof(GameObject))
+            {
+                var named = FindNamed(uiComponent.transform, fieldInfo.Name);
+                if (named == null)
+                    return EBindStatus.Failed;
+                fieldInfo.SetValue(uiComponent, named.gameObject);
+                return EBindStatus.Success;
+            }
+
             if (!typeof(Component).IsAssignableFrom(fieldType))
             {
                 return EBindStatus.Skip;
@@ -281,7 +247,7 @@ namespace Air.UI.Editor
                 return EBindStatus.Skip;
             }
                 
-            Component foundComponent = FindComponentInChildren(uiComponent.transform, fieldType, fieldName);
+            Component foundComponent = FindNamedComponent(uiComponent.transform, fieldType, fieldName);
                 
             if (!foundComponent)
             {
@@ -290,16 +256,6 @@ namespace Air.UI.Editor
                 
             fieldInfo.SetValue(uiComponent, foundComponent);
             Debug.Log($"Bound field {fieldName} ({fieldType.Name}) to {foundComponent.name}");
-                            
-            // 如果绑定的是UIComponent类型，设置其parent字段为当前组件，并处理Childs列表
-            if (foundComponent is UIComponent childUIComponent)
-            {
-                SetParentField(childUIComponent, uiComponent);
-                
-                // 查找并绑定对应的Childs列表字段
-                BindChildsListField(uiComponent, fieldName, childUIComponent);
-            }
-
             return EBindStatus.Success;
         }
         
@@ -314,95 +270,7 @@ namespace Air.UI.Editor
             Type genericArg = fieldType.GetGenericArguments()[0];
             return genericArg == typeof(UIComponent) || genericArg.IsSubclassOf(typeof(UIComponent));
         }
-        
-        /// <summary>
-        /// 绑定UIComponent的Childs列表字段
-        /// </summary>
-        /// <param name="parentComponent">父组件</param>
-        /// <param name="uiComponentFieldName">UIComponent字段名</param>
-        /// <param name="childUIComponent">子UIComponent实例</param>
-        private static void BindChildsListField(UIComponent parentComponent, string uiComponentFieldName, UIComponent childUIComponent)
-        {
-            // 查找对应的Childs字段（命名规则：uiComponentFieldName + "Childs"）
-            string childsFieldName = uiComponentFieldName + "Childs";
-            
-            Type parentType = parentComponent.GetType();
-            FieldInfo childsField = parentType.GetField(childsFieldName, BindingFlags.NonPublic | BindingFlags.Instance);
-            
-            if (childsField == null)
-            {
-                // 没有对应的Childs字段，跳过
-                return;
-            }
-            
-            if (!IsListOfUIComponent(childsField.FieldType))
-            {
-                Debug.LogWarning($"Field {childsFieldName} is not of type List<UIComponent>");
-                return;
-            }
-            
-            // 收集子UIComponent的所有直接子UIComponent
-            List<UIComponent> childsList = new List<UIComponent>();
-            Transform childTransform = childUIComponent.transform;
-            
-            for (int i = 0; i < childTransform.childCount; i++)
-            {
-                Transform grandChild = childTransform.GetChild(i);
-                if (grandChild.TryGetComponent<UIComponent>(out var grandChildUIComponent))
-                {
-                    childsList.Add(grandChildUIComponent);
-                }
-            }
-            
-            // 设置Childs字段值
-            childsField.SetValue(parentComponent, childsList);
-            
-            if (childsList.Count > 0)
-            {
-                Debug.Log($"Bound {childsFieldName} with {childsList.Count} child UIComponents");
-            }
-        }
-        
-        public static void BindParentUIComponent(this UIComponent uiComponent)
-        {
-            var parent = uiComponent.transform.parent;
-            while (parent)
-            {
-                if (parent.TryGetComponent<UIComponent>(out var uiComponentParent))
-                {
-                    uiComponent.Parent = uiComponentParent;
-                    break;
-                }
-                parent = parent.parent;
-            }
-        }
-        
-        /// <summary>
-        /// 设置UIComponent的parent字段
-        /// </summary>
-        /// <param name="childComponent">子UIComponent</param>
-        /// <param name="parentComponent">父UIComponent</param>
-        private static void SetParentField(UIComponent childComponent, UIComponent parentComponent)
-        {
-            if (childComponent == null || parentComponent == null) return;
-            
-            // 获取基类UIComponent中的parent字段
-            FieldInfo parentField = typeof(UIComponent).GetField(UIComponentParnentFieldName, 
-                BindingFlags.NonPublic | BindingFlags.Instance);
-            
-            if (parentField != null)
-            {
-                parentField.SetValue(childComponent, parentComponent);
-                Debug.Log($"Set parent of {childComponent.name} to {parentComponent.name}");
-                EditorUtility.SetDirty(childComponent);
-            }
-            else
-            {
-                Debug.LogWarning("Could not find parent field in UIComponent base class");
-            }
-        }
 
-        
         /// <summary>
         /// 在子物体中查找指定类型的组件
         /// </summary>
@@ -410,37 +278,27 @@ namespace Air.UI.Editor
         /// <param name="componentType">组件类型</param>
         /// <param name="fieldName">字段名</param>
         /// <returns>找到的组件，如果没找到返回null</returns>
-        private static Component FindComponentInChildren(Transform parent, Type componentType, string fieldName)
+        static Transform FindNamed(Transform parent, string fieldName)
         {
-            Component[] components = parent.GetComponentsInChildren(componentType, true);
-            
-            if (components.Length == 1)
+            for (int i = 0; i < parent.childCount; i++)
             {
-                return components[0];
+                var child = parent.GetChild(i);
+                if (child.name == fieldName)
+                    return child;
+                if (UIScriptGenerator.HidesDescendants(child))
+                    continue;
+                var found = FindNamed(child, fieldName);
+                if (found != null)
+                    return found;
             }
-            
-            // 尝试通过名称匹配
-            foreach (Component component in components)
-            {
-                string componentName = component.name.Replace(" ", "").Replace("(", "").Replace(")", "");
-                string expectedName = char.ToLower(componentName[0]) + componentName.Substring(1) + componentType.Name;
-                
-                if (expectedName == fieldName)
-                {
-                    return component;
-                }
-            }
-            
-            // 尝试通过字段名包含组件名的方式匹配
-            foreach (Component component in components)
-            {
-                if (component.name.IndexOf(fieldName.Replace(componentType.Name, ""), StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    return component;
-                }
-            }
-            
-            return components.Length > 0 ? components[0] : null;
+
+            return null;
+        }
+
+        static Component FindNamedComponent(Transform parent, Type componentType, string fieldName)
+        {
+            var named = FindNamed(parent, fieldName);
+            return named == null ? null : named.GetComponent(componentType);
         }
         
         /// <summary>

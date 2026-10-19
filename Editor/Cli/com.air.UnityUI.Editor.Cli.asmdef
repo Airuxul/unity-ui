@@ -1,0 +1,27 @@
+{
+  "name": "com.air.UnityUI.Editor.Cli",
+  "rootNamespace": "Air.UI.Editor.Cli",
+  "references": [
+    "com.air.UnityUI.Editor",
+    "com.air.UcpAgent.Runtime"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "AIR_UCP_AGENT"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.air.ucp-agent",
+      "expression": "0.1.0",
+      "define": "AIR_UCP_AGENT"
+    }
+  ],
+  "noEngineReferences": false
+}

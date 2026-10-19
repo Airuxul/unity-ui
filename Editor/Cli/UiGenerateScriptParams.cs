@@ -1,4 +1,4 @@
-using Air.UnityConnector.Params;
+using Air.UcpAgent.Params;
 
 namespace Air.UI.Editor.Cli
 {
@@ -25,13 +25,16 @@ namespace Air.UI.Editor.Cli
         [CliParam("root_name", Description = "Rename prefab root GameObject before generate")]
         public string RootName { get; set; }
 
+        [CliParam(Description = "Generate from this child node instead of the prefab root")]
+        public string Node { get; set; }
+
         [CliParam("preserve_logic", Description = "Keep existing logic .cs when it contains preserve_marker or is not a stub")]
         public bool? PreserveLogic { get; set; }
 
         [CliParam("preserve_marker", Description = "Substring; when set, logic is kept only if file contains it")]
         public string PreserveMarker { get; set; }
 
-        [CliParam("strip_panel", Description = "Remove UIPanel/UIComponent on prefab root before generate")]
+        [CliParam("strip_panel", Description = "Remove UIView/UIComponent on prefab root before generate")]
         public bool? StripPanel { get; set; }
 
         [CliParam("refresh_designer", Description = "Delete .Designer.cs before regenerate")]
